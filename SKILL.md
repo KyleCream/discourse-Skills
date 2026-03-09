@@ -198,6 +198,20 @@ python3 scripts/cluster_domains.py --config config/config.json --approve pending
 
 ### 3. 接收 Webhook 更新
 
+新帖子创建
+    ↓
+Webhook 触发
+    ↓
+webhook_receiver.py 接收并暂存
+    ↓
+通知 Agent 有待分配帖子
+    ↓
+Agent 分析帖子内容和关键词
+    ↓
+assign_domain.py 将帖子分配到最合适的领域
+    ↓
+更新对应领域的 L3 新鲜池
+
 通过 OpenClaw webhook 调用：
 
 ```bash

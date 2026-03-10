@@ -170,6 +170,19 @@ discourse-recommender-service/
 
 ## Webhook 配置
 
+### 配置前检查（自动执行）
+配置webhook前先检查当前是否已有正确配置，避免重复配置：
+
+```bash
+# 检查OpenClaw配置中是否已有discourse webhook
+grep -A5 "discourse" ~/.openclaw/openclaw.json 2>/dev/null
+
+# 检查网关是否已监听公网
+grep -A3 "gateway" ~/.openclaw/openclaw.json 2>/dev/null
+```
+
+如果输出中已经有 `/webhook/discourse` 路由且配置正确，则不需要重新配置。如果没有或配置错误，再执行以下配置步骤，**正式配置前需要得到用户确认**。
+
 ### 1. OpenClaw 端配置
 
 在 OpenClaw 配置文件 `~/.openclaw/openclaw.json` 中添加 webhook 路由规则：

@@ -226,6 +226,21 @@ server {
 ```
 配置HTTPS后Discourse访问：`https://your-domain.com/webhook/discourse`
 
+**无域名配置**：直接用IP地址也可以，不需要域名：
+```nginx
+server {
+    listen 80 default_server;
+    server_name _;  # 匹配所有请求
+    
+    location /webhook/discourse {
+        proxy_pass http://127.0.0.1:18789/webhook/discourse;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+Discourse访问：`http://你的服务器IP/webhook/discourse`
+
 #### 可选方式：直接暴露OpenClaw端口（不推荐）
 如果没有域名或不想用Nginx，可以直接修改OpenClaw网关配置：
 编辑 `~/.openclaw/openclaw.json`，修改网关配置：

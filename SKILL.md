@@ -200,15 +200,41 @@ grep -A3 "gateway" ~/.openclaw/openclaw.json 2>/dev/null
 
 ### 3. 公网暴露配置（可选，需要Discourse能访问到）
 
-默认OpenClaw网关仅监听本地127.0.0.1:18789，如果需要Discourse能访问到，有两种方式：
+默认OpenClaw网关仅监听本地127.0.0.1:18789，如果需要Discourse能访问到，**推荐使用Nginx反向代理方式（最安全）**：
 
-#### 方式1：修改OpenClaw网关绑定地址（推荐）
-编辑 `~/.openclaw/openclaw.json`，添加或修改网关配置：
+#### ✅ 推荐方式：Nginx反向代理（安全、易维护）
+不需要修改OpenClaw默认配置，不需要开放额外端口，只用80/443标准端口：
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;  # 替换为你的域名
+    
+    # Discourse webhook 路由
+    location /webhook/discourse {
+        proxy_pass http://127.0.0.1:18789/webhook/discourse;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    
+    # 其他webhook可以继续添加（如GitHub、GitLab等）
+    # location /webhook/github {
+    #     proxy_pass http://127.0.0.1:18789/webhook/github;
+    # }
+}
+```
+配置HTTPS后Discourse访问：`https://your-domain.com/webhook/discourse`
+
+#### 可选方式：直接暴露OpenClaw端口（不推荐）
+如果没有域名或不想用Nginx，可以直接修改OpenClaw网关配置：
+编辑 `~/.openclaw/openclaw.json`，修改网关配置：
 ```json
 {
   "gateway": {
-    "port": 18789,
-    "bind": "0.0.0.0"
+    "port": 18789,  // 可以换成其他端口，如8080、9000等
+    "bind": "0.0.0.0",
+    "mode": "local"
   }
 }
 ```
@@ -216,22 +242,9 @@ grep -A3 "gateway" ~/.openclaw/openclaw.json 2>/dev/null
 ```bash
 openclaw gateway restart
 ```
-然后在服务器防火墙开放18789端口，Discourse直接访问 `https://your-server-ip:18789/webhook/discourse`
+然后在服务器防火墙开放对应端口，Discourse访问：`https://your-server-ip:18789/webhook/discourse`
 
-#### 方式2：使用Nginx反向代理
-配置Nginx反向代理到本地18789端口：
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-    location /webhook/discourse {
-        proxy_pass http://127.0.0.1:18789/webhook/discourse;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-Discourse访问 `https://your-domain.com/webhook/discourse`
+⚠️ 注意：直接暴露端口存在安全风险，建议配置防火墙白名单，仅允许Discourse服务器IP访问。
 
 ### 4. 测试webhook是否正常
 本地测试：

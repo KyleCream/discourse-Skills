@@ -185,14 +185,52 @@ discourse-recommender-service/
 }
 ```
 
-配置完成后重启 OpenClaw 网关：
+### 3. 公网暴露配置（可选，需要Discourse能访问到）
+
+默认OpenClaw网关仅监听本地127.0.0.1:18789，如果需要Discourse能访问到，有两种方式：
+
+#### 方式1：修改OpenClaw网关绑定地址（推荐）
+编辑 `~/.openclaw/openclaw.json`，添加或修改网关配置：
+```json
+{
+  "gateway": {
+    "port": 18789,
+    "bind": "0.0.0.0"
+  }
+}
+```
+重启网关：
 ```bash
 openclaw gateway restart
 ```
+然后在服务器防火墙开放18789端口，Discourse直接访问 `https://your-server-ip:18789/webhook/discourse`
 
-测试 webhook 是否正常：
+#### 方式2：使用Nginx反向代理
+配置Nginx反向代理到本地18789端口：
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    location /webhook/discourse {
+        proxy_pass http://127.0.0.1:18789/webhook/discourse;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+Discourse访问 `https://your-domain.com/webhook/discourse`
+
+### 4. 测试webhook是否正常
+本地测试：
 ```bash
 curl -X POST http://127.0.0.1:18789/webhook/discourse \
+  -H "Content-Type: application/json" \
+  -d @/root/.openclaw/workspace/skills/discourse-recommender-service/real_webhook_payload.json
+```
+
+公网测试：
+```bash
+curl -X POST https://your-public-address/webhook/discourse \
   -H "Content-Type: application/json" \
   -d @/root/.openclaw/workspace/skills/discourse-recommender-service/real_webhook_payload.json
 ```

@@ -1,6 +1,6 @@
 ---
 name: discourse-recommender-service
-description: Discourse 论坛高级推荐服务。冷启动初始化 + 定时领域聚类 + Webhook 实时更新 + 多领域分层缓存 + 用户主动问询交互式推荐 + agent 智能推荐理由 + 更新用户画像。
+description: Discourse 论坛高级推荐服务。基于tag的智能推荐系统，支持新帖自动分配tag、交互式推荐、agent智能编写推荐理由、自动更新用户画像，开箱即用。
 ---
 
 # Discourse Recommender Service
@@ -27,8 +27,10 @@ Discourse 论坛高级推荐服务。
        ↓
 【Webhook 实时更新】
   ├─ 接收新帖通知
-  ├─ 根据帖子标签分类到对应tag领域
-  └─ 更新对应tag的帖子索引
+  ├─ 自动提取帖子自带tag
+  ├─ 检查tag是否存在于现有tag_dict中
+  ├─ ✅ 存在 → 自动分配到对应tag领域，更新tag索引
+  └─ ❌ 不存在 → 通知agent审核，支持手动分配或创建新tag
        ↓
 【用户画像】
   ├─ 记录用户感兴趣的tag领域（tag_ids）
@@ -61,27 +63,29 @@ Discourse 论坛高级推荐服务。
 ## 核心架构
 
 ### 基础设施
-- **冷启动初始化**：分类为领域 → 初始化 L1/L3 缓存
-- **定时领域聚类**：收集画像 → 自动聚类 → agent 审核 → 更新领域
-- **Webhook 实时更新**：新帖通知 → 分类到领域 → 更新 L3 新鲜池
-- **多领域分层缓存**：每个领域独立的 L1（热门池）+ L3（新鲜池）
+- **冷启动初始化**：加载tag_dict → 为每个tag创建领域配置 → 生成domains.json
+- **定时领域维护**：预留接口，后续实现领域优化、质量监控、合并/拆分逻辑
+- **Webhook 实时更新**：新帖通知 → 自动识别tag → 合理tag自动分配 → 不合理tag通知agent审核
+- **tag索引系统**：每个tag独立的帖子索引，无需分层缓存，直接从tag获取所有相关帖子
 
 ### 交互式推荐
-- **用户主动问询**：获取用户信息 → 交互确认需求
-- **从用户领域找帖子**：从用户感兴趣的领域的 L1/L3 找
+- **用户主动问询**：获取用户信息 → 交互确认需求（可选）
+- **从用户感兴趣领域获取帖子**：从用户tag领域获取所有相关帖子
+- **Agent 智能筛选排序**：agent基于帖子内容、用户偏好进行智能筛选和排序
 - **Agent 智能推荐理由**：必须由 agent 手动编写，禁止代码自动生成
-- **更新用户画像**：记录用户感兴趣的领域、关键词、推荐历史
+- **自动更新用户画像**：记录用户感兴趣的tag领域、关键词、推荐历史
 
 ---
 
-## 多领域分层缓存设计
+## tag索引系统设计
 
-每个领域有独立的两层缓存：
+每个tag对应独立的索引文件，无需分层缓存：
 
-| 层级 | 说明 | 容量 | 更新频率 |
-|------|------|------|---------|
-| L1 | 领域热门池 | 50 帖 | 重新聚类/初始化时 |
-| L3 | 领域新鲜池 | 100 帖 | Webhook 实时 |
+| 项目 | 说明 | 存储位置 |
+|------|------|---------|
+| tag_dict | 所有tag对应的帖子URL列表 | domains.json |
+| tag索引 | 每个tag下所有帖子的详细信息（标题、链接、作者、关键词等） | tags/{tag名称}.json |
+| 领域定义 | tag与领域ID的映射关系 | domains.json |
 
 ---
 
@@ -166,9 +170,38 @@ discourse-recommender-service/
 
 ## Webhook 配置
 
+### 1. OpenClaw 端配置
+
+在 OpenClaw 配置文件 `~/.openclaw/openclaw.json` 中添加 webhook 路由规则：
+
+```json
+{
+  "webhooks": {
+    "/webhook/discourse": {
+      "handler": "shell",
+      "command": "python3 /root/.openclaw/workspace/skills/discourse-recommender-service/scripts/webhook_handler.py --config /root/.openclaw/workspace/skills/discourse-recommender-service/config/config.json --payload '${payload}'"
+    }
+  }
+}
+```
+
+配置完成后重启 OpenClaw 网关：
+```bash
+openclaw gateway restart
+```
+
+测试 webhook 是否正常：
+```bash
+curl -X POST http://127.0.0.1:18789/webhook/discourse \
+  -H "Content-Type: application/json" \
+  -d @/root/.openclaw/workspace/skills/discourse-recommender-service/real_webhook_payload.json
+```
+
+### 2. Discourse 端配置
+
 在 Discourse 管理后台设置 webhook：
 
-- **Payload URL**: `https://your-openclaw-server/webhook/discourse`
+- **Payload URL**: `https://your-openclaw-server/webhook/discourse`（替换为你的服务器公网地址）
 - **Content Type**: `application/json`
 - **触发事件**: `topic_created`
 
@@ -176,38 +209,50 @@ discourse-recommender-service/
 
 ## 基础设施功能
 
-### 1. 冷启动初始化（首次）
+### 1. 冷启动初始化（两种方式）
 
+#### 方式1：使用仓库自带的预初始化数据（推荐，开箱即用）
 ```bash
-# 用分类作为初始领域，初始化缓存
+# 直接克隆仓库即可使用，已经包含完整的tag_dict和tag索引
+git clone https://github.com/KyleCream/discourse-Skills.git
+```
+
+#### 方式2：全新初始化
+```bash
+# 自动获取Discourse分类作为初始tag
 python3 scripts/init_cache.py --config config/config.json
+
+# 或使用自定义tag字典
+python3 scripts/init_cache.py --config config/config.json --tag-dict your_tag_dict.json
 ```
 
-### 2. 定时领域聚类（每天一次，Cron）
+### 2. 脚本列表
 
-```bash
-# 步骤 1: 收集画像 + 聚类 + 生成待审核文件
-python3 scripts/cluster_domains.py --config config/config.json --output pending_audit.json
+| 脚本名称 | 功能说明 |
+|----------|---------|
+| `init_cache.py` | 冷启动初始化，生成tag领域和domains.json |
+| `interactive_recommend.py` | 交互式推荐，数据准备阶段，输出候选帖子 |
+| `webhook_handler.py` | Webhook处理，新帖自动分配tag |
+| `assign_domain.py` | 手动/自动分配帖子到tag领域，支持自动创建新tag |
+| `update_profile_after_recommend.py` | 推荐完成后更新用户画像 |
+| `send_pm.py` | 发送Discourse站内信，支持直接发送文本或推荐列表 |
+| `utils.py` | 工具函数，包含API客户端、配置加载、站内信发送等 |
+| `build_user_profile.py` | 构建/更新单个用户画像 |
+| `build_profile.py` | 批量构建用户画像 |
 
-# 步骤 2: agent 审核后，应用新领域划分
-python3 scripts/cluster_domains.py --config config/config.json --approve pending_audit.json
-```
-
-### 3. 接收 Webhook 更新
+### 3. 接收 Webhook 更新（全自动流程）
 
 新帖子创建
     ↓
 Webhook 触发
     ↓
-webhook_receiver.py 接收并暂存
+webhook_handler.py 接收新帖信息
     ↓
-通知 Agent 有待分配帖子
+自动提取帖子自带的tag
     ↓
-Agent 分析帖子内容和关键词
-    ↓
-assign_domain.py 将帖子分配到最合适的领域
-    ↓
-更新对应领域的 L3 新鲜池
+检查tag是否存在于现有tag_dict中
+    ├─ ✅ 存在 → 自动调用assign_domain.py分配到对应tag领域，更新tag索引
+    └─ ❌ 不存在 → 保存为待分配，通知agent审核处理
 
 通过 OpenClaw webhook 调用：
 
@@ -215,14 +260,28 @@ assign_domain.py 将帖子分配到最合适的领域
 python3 scripts/webhook_handler.py --config config/config.json --payload webhook_payload.json
 ```
 
-### 4. 简单版推荐
+#### 手动分配帖子（当tag不存在时）
+```bash
+# 分配到现有tag
+python3 scripts/assign_domain.py --config config/config.json --topic-id <帖子ID> --tag <现有tag名称>
+
+# 自动创建新tag并分配
+python3 scripts/assign_domain.py --config config/config.json --topic-id <帖子ID> --tag <新tag名称>
+```
+
+### 4. 快速开始
 
 ```bash
-# 从所有领域推荐
-python3 scripts/recommend.py --config config/config.json --top 10
+# 1. 克隆仓库
+git clone https://github.com/KyleCream/discourse-Skills.git ~/.openclaw/workspace/skills/discourse-recommender-service
 
-# 从指定领域推荐
-python3 scripts/recommend.py --config config/config.json --domain 4 --top 10
+# 2. 创建配置文件
+cd ~/.openclaw/workspace/skills/discourse-recommender-service
+cp config/config.json.example config/config.json
+# 编辑config.json，填写你的Discourse API信息
+
+# 3. 测试推荐
+python3 scripts/interactive_recommend.py --config config/config.json --username 你的用户名 --keywords "AI,开发" --top 3
 ```
 
 ---
@@ -242,7 +301,7 @@ python3 scripts/recommend.py --config config/config.json --domain 4 --top 10
     ├─ 加载领域定义
     ├─ 加载用户画像
     ├─ 如果有关键词，更新用户画像
-    ├─ 从用户感兴趣的领域加载候选（L1 + L3）
+    ├─ 从用户感兴趣的tag领域加载所有相关帖子
     └─ 根据用户偏好排序
     ↓
 步骤 4：Agent 查看输出，编写智能推荐理由
@@ -301,7 +360,7 @@ python3 scripts/interactive_recommend.py \
 1. 领域定义加载情况
 2. 用户画像加载情况
 3. 目标领域确认
-4. 从目标领域加载候选帖子（L1 + L3）
+4. 从目标tag领域加载所有相关帖子
 5. 根据用户偏好排序后的推荐列表（供 agent 编写推荐理由）
 
 ---
@@ -330,7 +389,16 @@ Agent 应该：
 
 通过飞书和站内信发送推荐：
 - **飞书**：直接在对话中发送
-- **站内信**：调用 discourse API 发送
+- **站内信**：使用 `send_pm.py` 脚本发送
+
+#### 站内信发送示例：
+```bash
+# 直接发送文本内容
+python3 scripts/send_pm.py --config config/config.json --to zekang.chen --title "🤖 为你推荐的帖子" --content "这里是推荐内容"
+
+# 从推荐结果JSON文件发送
+python3 scripts/send_pm.py --config config/config.json --to zekang.chen --title "🤖 为你推荐的帖子" --content temp_recommendation.json
+```
 
 ---
 
@@ -401,11 +469,12 @@ python3 scripts/update_profile_after_recommend.py \
 
 ## 注意事项
 
-- **推荐理由必须由 Agent 手动编写**，禁止使用代码自动生成的模板理由
-- **找帖子从用户感兴趣的领域找**，不是简单关键词匹配
-- 配置文件 `config/config.json` 包含敏感信息，请勿提交到版本控制
-- 领域缓存位于 `domains/` 目录，可随时删除重建
-- 用户画像位于 `profiles/` 目录
-- 冷启动时（无领域定义）使用分类作为初始领域
-- API Key 需要有足够权限（读取帖子、用户信息）
-- 临时文件会在更新画像后自动清理
+- ✅ **开箱即用**：仓库已包含预初始化的tag_dict和tag索引，无需重新初始化即可使用
+- ⚠️ **推荐理由必须由 Agent 手动编写**，禁止使用代码自动生成的模板理由
+- 🎯 **智能筛选**：agent基于帖子内容、用户偏好进行智能筛选和排序，不是简单关键词匹配
+- 🔒 配置文件 `config/config.json` 包含敏感信息，请勿提交到版本控制
+- 📂 tag索引位于 `tags/` 目录，每个tag对应一个JSON文件
+- 👤 用户画像位于 `profiles/` 目录，记录用户兴趣和推荐历史
+- 🔑 API Key 需要有足够权限（读取帖子、用户信息、发送站内信）
+- 🧹 临时文件会在更新画像后自动清理
+- 🌐 多OpenClaw实例支持：所有数据都在仓库中，其他实例克隆后即可使用

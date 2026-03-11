@@ -53,42 +53,23 @@ def save_user_profile(skill_dir, username, profile):
     save_cache(profile_file, profile)
 
 
-def load_domains(skill_dir):
-    """加载领域定义（tag与领域的映射）"""
-    domains_file = os.path.join(skill_dir, "domains.json")
-    if os.path.exists(domains_file):
-        return load_cache(domains_file)
-    return {"domains": {}}
-
-
-def get_tags_from_keywords(keywords, domains_data):
-    """根据关键词匹配对应的tag"""
+def get_tags_from_keywords(keywords, skill_dir):
+    """根据关键词匹配对应的tag（直接匹配，不依赖domain文件）"""
     tags = set()
+    tags_dir = os.path.join(skill_dir, "tags")
     
-    # 1. 从领域定义中匹配tag
-    domains = domains_data.get("domains", {})
-    for domain_id, domain_info in domains.items():
-        domain_tags = domain_info.get("tags", [])
-        domain_name = domain_info.get("name", "").lower()
-        
-        # 关键词匹配领域名称
-        for kw in keywords:
-            kw_lower = kw.lower()
-            if kw_lower in domain_name:
-                tags.update(domain_tags)
-                
-            # 关键词匹配tag名称
-            for tag in domain_tags:
-                if kw_lower in tag.lower():
-                    tags.add(tag)
+    if not os.path.exists(tags_dir):
+        return list(tags)
     
-    # 2. 直接将关键词作为tag（如果存在对应的tag文件）
-    tags_dir = os.path.join(Path(SCRIPT_DIR).parent, "tags")
-    if os.path.exists(tags_dir):
-        for kw in keywords:
-            tag_file = os.path.join(tags_dir, f"{kw}.json")
-            if os.path.exists(tag_file):
-                tags.add(kw)
+    # 获取所有存在的tag
+    existing_tags = [os.path.splitext(f)[0] for f in os.listdir(tags_dir) if f.endswith('.json')]
+    
+    # 关键词匹配tag名称（包含匹配）
+    for kw in keywords:
+        kw_lower = kw.lower()
+        for tag in existing_tags:
+            if kw_lower in tag.lower() or tag.lower() in kw_lower:
+                tags.add(tag)
     
     return list(tags)
 
@@ -197,13 +178,15 @@ def main():
     print("🤖 Discourse 交互式推荐 - 数据准备阶段（基于Tag索引）")
     print("="*70)
     
-    # ========== 步骤 1：加载领域定义 ==========
-    print(f"\n📚 加载领域定义...")
-    domains_data = load_domains(skill_dir)
-    all_domains = domains_data.get("domains", {})
-    print(f"   ✅ 已加载 {len(all_domains)} 个领域")
-    for domain_id, domain_info in all_domains.items():
-        print(f"   - 领域 {domain_id}: {domain_info['name']} (tags: {', '.join(domain_info.get('tags', []))})")
+    # ========== 步骤 1：加载现有Tag列表 ==========
+    print(f"\n🏷️  加载现有Tag列表...")
+    tags_dir = os.path.join(skill_dir, "tags")
+    existing_tags = []
+    if os.path.exists(tags_dir):
+        existing_tags = [os.path.splitext(f)[0] for f in os.listdir(tags_dir) if f.endswith('.json')]
+    print(f"   ✅ 已加载 {len(existing_tags)} 个Tag")
+    if existing_tags:
+        print(f"   现有Tag: {', '.join(existing_tags[:10])}{'...' if len(existing_tags) > 10 else ''}")
     
     # ========== 步骤 2：加载/创建用户画像 ==========
     print(f"\n👤 加载用户画像: {args.username}")
@@ -233,7 +216,7 @@ def main():
         all_keywords = user_keywords + input_keywords
         
         if all_keywords:
-            target_tags = get_tags_from_keywords(all_keywords, domains_data)
+            target_tags = get_tags_from_keywords(all_keywords, skill_dir)
             print(f"\n🎯 从关键词匹配tag: {', '.join(target_tags)}")
         else:
             # 新用户，加载所有tag

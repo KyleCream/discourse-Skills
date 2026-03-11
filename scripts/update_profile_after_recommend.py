@@ -38,21 +38,18 @@ def update_profile_with_recommendations(profile, recommended_posts, user_feedbac
     
     # ========== 从推荐帖子中提取信息 ==========
     
-    # 1. 提取领域ID（新版核心：记录用户感兴趣的领域）
-    recommended_domain_ids = set()
+    # 1. 提取tag（核心：记录用户感兴趣的tag）
+    recommended_tags = set()
     for post in recommended_posts:
-        domain_id = post.get("_domain_id")
-        if domain_id and domain_id not in recommended_domain_ids:
-            recommended_domain_ids.add(domain_id)
+        tag = post.get("_tag")
+        if tag and tag not in recommended_tags:
+            recommended_tags.add(tag)
     
-    # 更新用户感兴趣的领域（如果有新领域，加入）
-    for domain_id in recommended_domain_ids:
-        if domain_id not in domain_ids:
-            domain_ids.append(domain_id)
-    
-    # 只保留最近 10 个领域
-    if len(domain_ids) > 10:
-        domain_ids = domain_ids[-10:]
+    # 更新用户感兴趣的领域（tag对应领域ID）
+    # 这里可以根据tag映射到领域ID，暂时直接保存tag到关键词
+    for tag in recommended_tags:
+        if tag not in keywords:
+            keywords.append(tag)
     
     # 2. 提取关键词（旧版逻辑）
     common_tech_keywords = ["ai", "coding", "代码", "编程", "github", "git", "项目", "开源", 

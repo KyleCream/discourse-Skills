@@ -54,47 +54,66 @@ def save_user_profile(skill_dir, username, profile):
 
 
 def load_domains(skill_dir):
-    """加载领域定义"""
+    """加载领域定义（tag与领域的映射）"""
     domains_file = os.path.join(skill_dir, "domains.json")
     if os.path.exists(domains_file):
         return load_cache(domains_file)
-    return {"domains": []}
+    return {"domains": {}}
 
 
-def load_posts_from_domains(skill_dir, domain_ids):
-    """从指定领域加载帖子（L1 热门池 + L3 新鲜池）"""
-    domains_dir = os.path.join(skill_dir, "domains")
+def get_tags_from_keywords(keywords, domains_data):
+    """根据关键词匹配对应的tag"""
+    tags = set()
+    
+    # 1. 从领域定义中匹配tag
+    domains = domains_data.get("domains", {})
+    for domain_id, domain_info in domains.items():
+        domain_tags = domain_info.get("tags", [])
+        domain_name = domain_info.get("name", "").lower()
+        
+        # 关键词匹配领域名称
+        for kw in keywords:
+            kw_lower = kw.lower()
+            if kw_lower in domain_name:
+                tags.update(domain_tags)
+                
+            # 关键词匹配tag名称
+            for tag in domain_tags:
+                if kw_lower in tag.lower():
+                    tags.add(tag)
+    
+    # 2. 直接将关键词作为tag（如果存在对应的tag文件）
+    tags_dir = os.path.join(Path(SCRIPT_DIR).parent, "tags")
+    if os.path.exists(tags_dir):
+        for kw in keywords:
+            tag_file = os.path.join(tags_dir, f"{kw}.json")
+            if os.path.exists(tag_file):
+                tags.add(kw)
+    
+    return list(tags)
+
+
+def load_posts_from_tags(skill_dir, tags):
+    """从指定tag加载帖子（从tags目录下的JSON文件读取）"""
+    tags_dir = os.path.join(skill_dir, "tags")
     all_posts = []
     
-    if not os.path.exists(domains_dir):
+    if not os.path.exists(tags_dir):
         return all_posts
     
-    for domain_id in domain_ids:
-        domain_dir = os.path.join(domains_dir, f"domain_{domain_id}")
-        if not os.path.exists(domain_dir):
+    for tag in tags:
+        tag_file = os.path.join(tags_dir, f"{tag}.json")
+        if not os.path.exists(tag_file):
             continue
         
-        # 加载 L1 热门池
-        l1_file = os.path.join(domain_dir, "l1_hot.json")
-        if os.path.exists(l1_file):
-            data = load_cache(l1_file)
-            posts = data.get("topics", [])
-            # 标记来源
-            for post in posts:
-                post["_domain_id"] = domain_id
-                post["_pool"] = "L1"
-            all_posts.extend(posts)
-        
-        # 加载 L3 新鲜池
-        l3_file = os.path.join(domain_dir, "l3_fresh.json")
-        if os.path.exists(l3_file):
-            data = load_cache(l3_file)
-            posts = data.get("topics", [])
-            # 标记来源
-            for post in posts:
-                post["_domain_id"] = domain_id
-                post["_pool"] = "L3"
-            all_posts.extend(posts)
+        # 加载tag对应的帖子
+        data = load_cache(tag_file)
+        posts = data.get("topics", [])
+        # 标记来源
+        for post in posts:
+            post["_tag"] = tag
+            post["_pool"] = "tag"
+        all_posts.extend(posts)
     
     return all_posts
 
@@ -158,11 +177,11 @@ def update_profile_with_keywords(profile, keywords):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="交互式推荐 - 数据准备阶段（有机结合新旧版）")
+    parser = argparse.ArgumentParser(description="交互式推荐 - 数据准备阶段（基于Tag索引）")
     parser.add_argument("--config", required=True, help="配置文件路径")
     parser.add_argument("--username", required=True, help="用户名")
-    parser.add_argument("--keywords", help="推荐关键词（逗号分隔，用于更新用户画像）")
-    parser.add_argument("--domain-ids", help="指定领域ID（逗号分隔，可选，默认从用户画像获取）")
+    parser.add_argument("--keywords", help="推荐关键词（逗号分隔，用于匹配tag和更新用户画像）")
+    parser.add_argument("--tags", help="指定tag（逗号分隔，可选，直接从指定tag获取帖子）")
     parser.add_argument("--skill-dir", help="Skill 目录路径")
     parser.add_argument("--top", type=int, default=5, help="推荐数量")
     parser.add_argument("--output", help="输出推荐结果到 JSON 文件")
@@ -175,23 +194,23 @@ def main():
         skill_dir = Path(SCRIPT_DIR).parent
     
     print("="*70)
-    print("🤖 Discourse 交互式推荐 - 数据准备阶段（有机结合新旧版）")
+    print("🤖 Discourse 交互式推荐 - 数据准备阶段（基于Tag索引）")
     print("="*70)
     
     # ========== 步骤 1：加载领域定义 ==========
     print(f"\n📚 加载领域定义...")
     domains_data = load_domains(skill_dir)
-    all_domains = domains_data.get("domains", [])
+    all_domains = domains_data.get("domains", {})
     print(f"   ✅ 已加载 {len(all_domains)} 个领域")
-    for domain in all_domains:
-        print(f"   - 领域 {domain['id']}: {domain['name']}")
+    for domain_id, domain_info in all_domains.items():
+        print(f"   - 领域 {domain_id}: {domain_info['name']} (tags: {', '.join(domain_info.get('tags', []))})")
     
     # ========== 步骤 2：加载/创建用户画像 ==========
     print(f"\n👤 加载用户画像: {args.username}")
     profile = get_user_profile(skill_dir, args.username)
     print(f"   ✅ 用户画像已加载（创建时间: {profile.get('created_at', '新用户')}）")
     
-    # ========== 步骤 3：处理输入关键词（更新用户画像） ==========
+    # ========== 步骤 3：处理输入关键词（更新用户画像 + 匹配tag） ==========
     input_keywords = []
     if args.keywords:
         input_keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
@@ -201,26 +220,31 @@ def main():
         save_user_profile(skill_dir, args.username, profile)
         print(f"   ✅ 用户画像已更新（关键词已加入）")
     
-    # ========== 步骤 4：确定要从哪些领域获取帖子 ==========
-    target_domain_ids = []
-    if args.domain_ids:
-        # 用户指定了领域
-        target_domain_ids = [d.strip() for d in args.domain_ids.split(",") if d.strip()]
-        print(f"\n🎯 使用指定领域: {', '.join(target_domain_ids)}")
+    # ========== 步骤 4：确定要从哪些tag获取帖子 ==========
+    target_tags = []
+    if args.tags:
+        # 用户指定了tag
+        target_tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+        print(f"\n🎯 使用指定tag: {', '.join(target_tags)}")
     else:
-        # 从用户画像获取感兴趣的领域
+        # 从用户画像获取兴趣关键词 + 当前输入关键词 → 匹配tag
         interests = profile.get("interests", {})
-        target_domain_ids = interests.get("domain_ids", [])
-        if target_domain_ids:
-            print(f"\n🎯 从用户画像获取领域: {', '.join(target_domain_ids)}")
+        user_keywords = interests.get("keywords", [])
+        all_keywords = user_keywords + input_keywords
+        
+        if all_keywords:
+            target_tags = get_tags_from_keywords(all_keywords, domains_data)
+            print(f"\n🎯 从关键词匹配tag: {', '.join(target_tags)}")
         else:
-            # 新用户，从所有领域获取
-            target_domain_ids = [d["id"] for d in all_domains]
-            print(f"\n🎯 新用户，从所有领域获取: {', '.join(target_domain_ids)}")
+            # 新用户，加载所有tag
+            tags_dir = os.path.join(skill_dir, "tags")
+            if os.path.exists(tags_dir):
+                target_tags = [os.path.splitext(f)[0] for f in os.listdir(tags_dir) if f.endswith('.json')]
+                print(f"\n🎯 新用户，从所有tag获取: {', '.join(target_tags[:10])}{'...' if len(target_tags) > 10 else ''}")
     
-    # ========== 步骤 5：从目标领域加载候选帖子（L1 + L3） ==========
-    print(f"\n📦 从领域加载候选帖子...")
-    candidate_posts = load_posts_from_domains(skill_dir, target_domain_ids)
+    # ========== 步骤 5：从目标tag加载候选帖子 ==========
+    print(f"\n📦 从tag加载候选帖子...")
+    candidate_posts = load_posts_from_tags(skill_dir, target_tags)
     print(f"   ✅ 加载了 {len(candidate_posts)} 个候选帖子")
     
     # 去重
@@ -244,7 +268,7 @@ def main():
     result = {
         "username": args.username,
         "input_keywords": input_keywords,
-        "target_domain_ids": target_domain_ids,
+        "target_tags": target_tags,
         "recommendations": final_posts,
         "generated_at": datetime.now().isoformat()
     }
@@ -264,12 +288,12 @@ def main():
         title = post.get("title")
         slug = post.get("slug", "topic")
         url = f"{config['discourse_url']}/t/{slug}/{post_id}"
-        domain_id = post.get("_domain_id", "?")
+        tag = post.get("_tag", "?")
         pool = post.get("_pool", "?")
         
         print(f"\n{i}. {title}")
         print(f"   🔗 {url}")
-        print(f"   📌 来源: 领域 {domain_id}, {pool} 池")
+        print(f"   🏷️ 标签: {tag}")
         print(f"   数据: id={post_id}, likes={post.get('like_count', 0)}, replies={post.get('posts_count', 0)}")
     
     print("\n" + "="*70)
@@ -281,7 +305,7 @@ def main():
     save_cache(temp_file, {
         "recommended_posts": final_posts,
         "input_keywords": input_keywords,
-        "target_domain_ids": target_domain_ids
+        "target_tags": target_tags
     })
     print(f"\n📝 临时数据已保存，用于后续更新用户画像")
 

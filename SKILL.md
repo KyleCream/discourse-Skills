@@ -25,14 +25,14 @@ Discourse 论坛高级推荐服务。
        ↓
 【用户主动问询 → 交互式推荐】
   ├─ 步骤 1：获取用户ID/用户名
-  ├─ 步骤 2：与用户交互，确认推荐需求（可选）
-  ├─ 步骤 3：加载用户画像
-  ├─ 步骤 4：获取用户感兴趣tag下的帖子列表（从tag_dict的URL获取）
-  ├─ 步骤 5：agent基于帖子内容、用户偏好进行智能筛选和排序
+  ├─ 步骤 2：与用户交互，确认推荐需求（可选，提取关键词）
+  ├─ 步骤 3：加载用户画像（包含用户感兴趣的tag、关键词、历史偏好）
+  ├─ 步骤 4：【算法匹配】根据用户画像的tag和关键词，从对应tag索引中获取候选帖子列表
+  ├─ 步骤 5：【Agent智能筛选】agent基于帖子内容、用户偏好进行二次筛选和排序
   ├─ 步骤 6：生成推荐列表
   ├─ 步骤 7：agent根据帖子内容编写智能推荐理由（必须手动写！）
   ├─ 步骤 8：返回给用户（飞书 + 站内信）
-  └─ 步骤 9：根据此次推荐更新用户画像
+  └─ 步骤 9：根据此次推荐更新用户画像（新增推荐的tag到用户兴趣）
        ↓
 【更新用户画像】
   ├─ 提取推荐帖子的tag，加入用户感兴趣的tag领域
@@ -50,9 +50,10 @@ Discourse 论坛高级推荐服务。
 - **tag索引系统**：每个tag独立的帖子索引，无需分层缓存，直接从tag获取所有相关帖子
 
 ### 交互式推荐
-- **用户主动问询**：获取用户信息 → 交互确认需求（可选）
-- **从用户感兴趣领域获取帖子**：从用户tag领域获取所有相关帖子
-- **Agent 智能筛选排序**：agent基于帖子内容、用户偏好进行智能筛选和排序
+- **用户主动问询**：获取用户信息 → 交互确认需求（可选，提取关键词）
+- **算法自动匹配tag**：根据用户画像中的兴趣tag和当前问询的关键词，自动匹配对应的tag索引
+- **从匹配的tag领域获取候选帖子**：从匹配的tag索引中加载所有相关帖子，按时间/热度初步排序
+- **Agent 智能筛选排序**：agent基于帖子内容、用户偏好进行二次筛选和个性化排序
 - **Agent 智能推荐理由**：必须由 agent 手动编写，禁止代码自动生成
 - **自动更新用户画像**：记录用户感兴趣的tag领域、关键词、推荐历史
 
@@ -108,30 +109,31 @@ discourse-recommender-service/
 ├── config/
 │   ├── config.json.example
 │   └── config.json          # (用户创建，不提交)
-├── domains/                 # 每个领域一个子目录
-│   ├── domain_0/
-│   │   ├── l1_hot.json
-│   │   └── l3_fresh.json
-│   ├── domain_1/
-│   │   ├── l1_hot.json
-│   │   └── l3_fresh.json
+├── tags/                    # Tag索引目录（由discourse-init和discourse-webhook更新）
+│   ├── 游戏.json
+│   ├── nba.json
+│   ├── 体育.json
 │   └── ...
 ├── profiles/                # 用户画像存储
 │   ├── zekang.chen.json
 │   ├── Kayle.json
 │   └── ...
-├── domains.json            # 领域定义
-├── user_domains.json       # 用户-领域映射
+├── domains.json            # 领域定义（由discourse-init生成）
 └── scripts/
-    ├── init_cache.py        # 冷启动初始化（分类为领域）
     ├── build_user_profile.py # 为单个用户构建画像
     ├── cluster_domains.py   # 定时领域聚类 + agent 审核
-    ├── webhook_handler.py   # Webhook 接收 + 分发更新
     ├── recommend.py         # 简单版推荐（从用户所属领域推荐）
     ├── utils.py             # 工具函数
     ├── interactive_recommend.py    # 交互式推荐 - 数据准备阶段
-    └── update_profile_after_recommend.py  # 推荐完成后更新用户画像
+    ├── update_profile_after_recommend.py  # 推荐完成后更新用户画像
+    ├── assign_domain.py     # 手动/自动分配帖子到tag领域
+    ├── build_profile.py     # 批量构建用户画像
+    └── send_pm.py           # 发送Discourse站内信
 ```
+
+**注意**：冷启动和Webhook功能已拆分为独立Skill：
+- 冷启动初始化：使用 [discourse-init](https://github.com/KyleCream/discourse-init) Skill
+- Webhook实时更新：使用 [discourse-webhooks](https://github.com/KyleCream/discourse-webhooks) Skill
 
 ---
 
@@ -193,12 +195,13 @@ python3 scripts/interactive_recommend.py --config config/config.json --username 
     ↓
 步骤 2：与用户交互，确认推荐需求（可选）
     ↓
-步骤 3：运行 interactive_recommend.py（数据准备）
-    ├─ 加载领域定义
-    ├─ 加载用户画像
-    ├─ 如果有关键词，更新用户画像
-    ├─ 从用户感兴趣的tag领域加载所有相关帖子
-    └─ 根据用户偏好排序
+步骤 3：运行 interactive_recommend.py（数据准备 - 算法自动匹配）
+    ├─ 加载领域定义和tag映射
+    ├─ 加载用户画像（提取用户已有的兴趣tag）
+    ├─ 分析用户当前问询的关键词，匹配对应的tag
+    ├─ 合并用户历史兴趣tag和当前关键词匹配的tag
+    ├─ 从所有匹配的tag索引中加载相关帖子
+    └─ 按时间/热度/相关性初步排序，生成候选列表
     ↓
 步骤 4：Agent 查看输出，编写智能推荐理由
     └─ 【重要】必须手动编写！禁止代码自动生成！

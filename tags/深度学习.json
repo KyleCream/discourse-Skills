@@ -1,0 +1,67 @@
+{
+  "topics": [
+    {
+      "fancy_title": "一文读懂Diffusion Model",
+      "id": 397968,
+      "title": "一文读懂Diffusion Model",
+      "slug": "topic",
+      "posts_count": 2,
+      "reply_count": 0,
+      "highest_post_number": 3,
+      "image_url": null,
+      "created_at": "2026-03-10T13:08:00.596Z",
+      "last_posted_at": "2026-03-10T13:13:13.399Z",
+      "bumped": true,
+      "bumped_at": "2026-03-10T13:13:13.399Z",
+      "archetype": "regular",
+      "unseen": true,
+      "pinned": false,
+      "unpinned": null,
+      "visible": true,
+      "closed": false,
+      "archived": false,
+      "bookmarked": null,
+      "liked": null,
+      "tags": [
+        {
+          "id": 16,
+          "name": "diffusion-model",
+          "slug": "16-tag"
+        },
+        {
+          "id": 15,
+          "name": "深度学习",
+          "slug": "15-tag"
+        }
+      ],
+      "tags_descriptions": {},
+      "views": 3,
+      "like_count": 0,
+      "has_summary": false,
+      "last_poster_username": "zekang.chen",
+      "category_id": 4,
+      "op_like_count": 0,
+      "pinned_globally": false,
+      "featured_link": null,
+      "has_accepted_answer": false,
+      "can_vote": false,
+      "posters": [
+        {
+          "extras": null,
+          "description": "原始发帖人",
+          "user_id": 4,
+          "primary_group_id": null,
+          "flair_group_id": null
+        },
+        {
+          "extras": "latest",
+          "description": "最新发帖人",
+          "user_id": 1,
+          "primary_group_id": null,
+          "flair_group_id": null
+        }
+      ]
+    }
+  ],
+  "updated_at": "2026-03-11T11:07:40Z"
+}

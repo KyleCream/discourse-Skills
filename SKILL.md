@@ -1,6 +1,6 @@
 ---
 name: discourse-recommender-service
-description: Discourse 论坛高级推荐服务。基于tag的智能推荐系统，支持新帖自动分配tag、交互式推荐、agent智能编写推荐理由、自动更新用户画像，开箱即用。
+description: Discourse 论坛高级推荐服务。基于tag的智能推荐系统，支持交互式推荐、agent智能编写推荐理由、自动更新用户画像，开箱即用。依赖独立的 discourse-webhook（实时更新）和 discourse-coldstart（冷启动） Skill。
 ---
 
 # Discourse Recommender Service
@@ -15,22 +15,9 @@ Discourse 论坛高级推荐服务。
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         discourse-recommender-service                       │
 └─────────────────────────────────────────────────────────────────────────────┘
-【冷启动初始化】
-  ├─ 加载 tag_dict（每个tag对应其帖子URL列表）
-  ├─ 为每个tag创建初始领域配置
-  └─ 生成 domains.json 领域定义（基于tag_dict）
-       ↓
-【定时领域维护（占位符 - 后续实现）】
-  ├─ [预留接口供后续领域优化逻辑]
-  ├─ [预留领域质量监控]
-  └─ [预留领域合并/拆分逻辑]
-       ↓
-【Webhook 实时更新】
-  ├─ 接收新帖通知
-  ├─ 自动提取帖子自带tag
-  ├─ 检查tag是否存在于现有tag_dict中
-  ├─ ✅ 存在 → 自动分配到对应tag领域，更新tag索引
-  └─ ❌ 不存在 → 通知agent审核，支持手动分配或创建新tag
+【依赖外部Skill完成数据更新】
+  ├─ 冷启动初始化 → 使用 discourse-coldstart Skill 手动执行
+  ├─ Webhook 实时更新 → 使用 discourse-webhook Skill 独立运行
        ↓
 【用户画像】
   ├─ 记录用户感兴趣的tag领域（tag_ids）
@@ -63,9 +50,8 @@ Discourse 论坛高级推荐服务。
 ## 核心架构
 
 ### 基础设施
-- **冷启动初始化**：加载tag_dict → 为每个tag创建领域配置 → 生成domains.json
-- **定时领域维护**：预留接口，后续实现领域优化、质量监控、合并/拆分逻辑
-- **Webhook 实时更新**：新帖通知 → 自动识别tag → 合理tag自动分配 → 不合理tag通知agent审核
+- **冷启动初始化**：使用 discourse-coldstart Skill 手动执行，全量构建tag索引和领域定义
+- **Webhook 实时更新**：使用 discourse-webhook Skill 独立运行，自动更新tag索引
 - **tag索引系统**：每个tag独立的帖子索引，无需分层缓存，直接从tag获取所有相关帖子
 
 ### 交互式推荐

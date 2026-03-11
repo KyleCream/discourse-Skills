@@ -161,8 +161,8 @@ def main():
     parser = argparse.ArgumentParser(description="交互式推荐 - 数据准备阶段（基于Tag索引）")
     parser.add_argument("--config", required=True, help="配置文件路径")
     parser.add_argument("--username", required=True, help="用户名")
-    parser.add_argument("--keywords", help="推荐关键词（逗号分隔，用于匹配tag和更新用户画像）")
-    parser.add_argument("--tags", help="指定tag（逗号分隔，可选，直接从指定tag获取帖子）")
+    parser.add_argument("--tags", required=True, help="指定tag（逗号分隔，由Agent根据用户画像选择）")
+    parser.add_argument("--keywords", help="推荐关键词（逗号分隔，仅用于更新用户画像）")
     parser.add_argument("--skill-dir", help="Skill 目录路径")
     parser.add_argument("--top", type=int, default=5, help="推荐数量")
     parser.add_argument("--output", help="输出推荐结果到 JSON 文件")
@@ -193,7 +193,7 @@ def main():
     profile = get_user_profile(skill_dir, args.username)
     print(f"   ✅ 用户画像已加载（创建时间: {profile.get('created_at', '新用户')}）")
     
-    # ========== 步骤 3：处理输入关键词（更新用户画像 + 匹配tag） ==========
+    # ========== 步骤 3：处理输入关键词（仅更新用户画像，不用于匹配tag） ==========
     input_keywords = []
     if args.keywords:
         input_keywords = [k.strip() for k in args.keywords.split(",") if k.strip()]
@@ -203,27 +203,29 @@ def main():
         save_user_profile(skill_dir, args.username, profile)
         print(f"   ✅ 用户画像已更新（关键词已加入）")
     
-    # ========== 步骤 4：确定要从哪些tag获取帖子 ==========
-    target_tags = []
-    if args.tags:
-        # 用户指定了tag
-        target_tags = [t.strip() for t in args.tags.split(",") if t.strip()]
-        print(f"\n🎯 使用指定tag: {', '.join(target_tags)}")
-    else:
-        # 从用户画像获取兴趣关键词 + 当前输入关键词 → 匹配tag
-        interests = profile.get("interests", {})
-        user_keywords = interests.get("keywords", [])
-        all_keywords = user_keywords + input_keywords
-        
-        if all_keywords:
-            target_tags = get_tags_from_keywords(all_keywords, skill_dir)
-            print(f"\n🎯 从关键词匹配tag: {', '.join(target_tags)}")
+    # ========== 步骤 4：使用Agent指定的tag ==========
+    target_tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+    print(f"\n🎯 使用Agent指定的tag: {', '.join(target_tags)}")
+    
+    # 校验tag是否存在，过滤不存在的tag
+    valid_tags = []
+    invalid_tags = []
+    for tag in target_tags:
+        tag_file = os.path.join(tags_dir, f"{tag}.json")
+        if os.path.exists(tag_file):
+            valid_tags.append(tag)
         else:
-            # 新用户，加载所有tag
-            tags_dir = os.path.join(skill_dir, "tags")
-            if os.path.exists(tags_dir):
-                target_tags = [os.path.splitext(f)[0] for f in os.listdir(tags_dir) if f.endswith('.json')]
-                print(f"\n🎯 新用户，从所有tag获取: {', '.join(target_tags[:10])}{'...' if len(target_tags) > 10 else ''}")
+            invalid_tags.append(tag)
+    
+    if invalid_tags:
+        print(f"   ⚠️  不存在的tag已过滤: {', '.join(invalid_tags)}")
+    
+    if not valid_tags:
+        # 如果没有有效tag，使用所有tag
+        valid_tags = existing_tags
+        print(f"   🎯 无有效tag，使用所有tag: {', '.join(valid_tags[:10])}{'...' if len(valid_tags) > 10 else ''}")
+    
+    target_tags = valid_tags
     
     # ========== 步骤 5：从目标tag加载候选帖子 ==========
     print(f"\n📦 从tag加载候选帖子...")

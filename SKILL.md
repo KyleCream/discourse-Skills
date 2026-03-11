@@ -25,14 +25,13 @@ Discourse 论坛高级推荐服务。
        ↓
 【用户主动问询 → 交互式推荐】
   ├─ 步骤 1：获取用户ID/用户名
-  ├─ 步骤 2：与用户交互，确认推荐需求（可选，提取关键词）
-  ├─ 步骤 3：加载用户画像（包含用户感兴趣的tag、关键词、历史偏好）
-  ├─ 步骤 4：【算法匹配】根据用户画像的tag和关键词，从对应tag索引中获取候选帖子列表
-  ├─ 步骤 5：【Agent智能筛选】agent基于帖子内容、用户偏好进行二次筛选和排序
-  ├─ 步骤 6：生成推荐列表
-  ├─ 步骤 7：agent根据帖子内容编写智能推荐理由（必须手动写！）
-  ├─ 步骤 8：返回给用户（飞书 + 站内信）
-  └─ 步骤 9：根据此次推荐更新用户画像（新增推荐的tag到用户兴趣）
+  ├─ 步骤 2：与用户交互，确认推荐需求（可选）
+  ├─ 步骤 3：【Agent负责】加载用户画像，分析用户兴趣，选择合适的Tag列表
+  ├─ 步骤 4：运行 interactive_recommend.py，传入Agent选择的Tag列表
+  ├─ 步骤 5：脚本从指定Tag的索引中加载候选帖子，按热门度/新鲜度排序
+  ├─ 步骤 6：【Agent负责】查看输出的候选列表，编写智能推荐理由（必须手动写！）
+  ├─ 步骤 7：返回给用户（飞书 + 站内信）
+  └─ 步骤 8：运行 update_profile_after_recommend.py，更新用户画像
        ↓
 【更新用户画像】
   ├─ 提取推荐帖子的tag，加入用户感兴趣的tag领域
@@ -50,12 +49,16 @@ Discourse 论坛高级推荐服务。
 - **tag索引系统**：每个tag独立的帖子索引，无需分层缓存，直接从tag获取所有相关帖子
 
 ### 交互式推荐
-- **用户主动问询**：获取用户信息 → 交互确认需求（可选，提取关键词）
-- **算法自动匹配tag**：根据用户画像中的兴趣tag和当前问询的关键词，自动匹配对应的tag索引
-- **从匹配的tag领域获取候选帖子**：从匹配的tag索引中加载所有相关帖子，按时间/热度初步排序
-- **Agent 智能筛选排序**：agent基于帖子内容、用户偏好进行二次筛选和个性化排序
-- **Agent 智能推荐理由**：必须由 agent 手动编写，禁止代码自动生成
-- **自动更新用户画像**：记录用户感兴趣的tag领域、关键词、推荐历史
+- **用户主动问询**：获取用户信息 → 交互确认需求（可选）
+- **【Agent核心职责】**：
+  1. 加载并分析用户画像
+  2. 根据用户历史兴趣和当前需求，手动选择合适的Tag列表
+  3. 查看脚本输出的候选帖子列表
+  4. 手动编写个性化推荐理由（禁止自动生成）
+- **脚本职责**：
+  1. 从Agent指定的Tag索引中加载所有相关帖子
+  2. 按热门度/新鲜度自动排序，生成候选列表
+- **自动更新用户画像**：推荐完成后自动记录推荐的Tag到用户兴趣
 
 ---
 
@@ -178,8 +181,8 @@ cd ~/.openclaw/workspace/skills/discourse-recommender-service
 cp config/config.json.example config/config.json
 # 编辑config.json，填写你的Discourse API信息
 
-# 3. 测试推荐
-python3 scripts/interactive_recommend.py --config config/config.json --username 你的用户名 --keywords "AI,开发" --top 3
+# 3. 测试推荐（Agent选择合适的Tag传入）
+python3 scripts/interactive_recommend.py --config config/config.json --username 你的用户名 --tags "ai,开发" --keywords "AI,开发" --top 3
 ```
 
 ---
@@ -195,12 +198,11 @@ python3 scripts/interactive_recommend.py --config config/config.json --username 
     ↓
 步骤 2：与用户交互，确认推荐需求（可选）
     ↓
-步骤 3：运行 interactive_recommend.py（数据准备 - 算法自动匹配）
-    ├─ 加载领域定义和tag映射
-    ├─ 加载用户画像（提取用户已有的兴趣tag）
-    ├─ 分析用户当前问询的关键词，匹配对应的tag
-    ├─ 合并用户历史兴趣tag和当前关键词匹配的tag
-    ├─ 从所有匹配的tag索引中加载相关帖子
+步骤 3：运行 interactive_recommend.py（数据准备）
+    ├─ 加载现有Tag列表
+    ├─ 加载用户画像
+    ├─ 使用Agent传入的指定Tag列表
+    ├─ 从指定Tag的索引中加载相关帖子
     └─ 按时间/热度/相关性初步排序，生成候选列表
     ↓
 步骤 4：Agent 查看输出，编写智能推荐理由
@@ -231,9 +233,9 @@ Agent 应该：
 
 ---
 
-### 步骤 2：运行交互式推荐脚本（数据准备阶段）
+### 步骤 2：Agent选择Tag，运行数据准备脚本
 
-获取用户和关键词后，运行：
+Agent分析用户画像和需求后，手动选择合适的Tag列表，运行：
 
 ```bash
 cd /path/to/discourse-recommender-service
@@ -242,6 +244,7 @@ cd /path/to/discourse-recommender-service
 python3 scripts/interactive_recommend.py \
   --config config/config.json \
   --username zekang.chen \
+  --tags "游戏,ai,体育" \
   --keywords "GitHub,AI,编程" \
   --top 5
 ```
@@ -249,17 +252,17 @@ python3 scripts/interactive_recommend.py \
 **参数说明：**
 - `--config`: 配置文件路径
 - `--username`: 用户名
-- `--keywords`: 推荐关键词，逗号分隔（可选，用于更新用户画像）
-- `--domain-ids`: 指定领域ID，逗号分隔（可选，默认从用户画像获取）
+- `--tags`: **必填**，Agent选择的Tag列表，逗号分隔
+- `--keywords`: 推荐关键词，逗号分隔（可选，仅用于更新用户画像）
 - `--top`: 推荐数量（默认 5）
 - `--output`: 输出推荐结果到 JSON 文件（可选）
 - `--skill-dir`: Skill 目录路径（可选）
 
 **脚本会输出：**
-1. 领域定义加载情况
+1. 现有Tag列表加载情况
 2. 用户画像加载情况
-3. 目标领域确认
-4. 从目标tag领域加载所有相关帖子
+3. Agent指定的Tag确认
+4. 从指定Tag加载所有相关帖子
 5. 根据用户偏好排序后的推荐列表（供 agent 编写推荐理由）
 
 ---
@@ -342,11 +345,12 @@ python3 scripts/update_profile_after_recommend.py \
 > Agent："好的，你是想要 AI 编程工具、代码审查、还是其他特定类型？"
 > 用户："AI 编程工具就行"
 
-**3. 运行数据准备脚本**
+**3. Agent选择Tag，运行数据准备脚本**
 ```bash
 python3 scripts/interactive_recommend.py \
   --config config/config.json \
   --username zekang.chen \
+  --tags "ai,编程,github" \
   --keywords "AI,coding,编程,代码" \
   --top 3
 ```

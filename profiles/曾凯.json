@@ -1,0 +1,22 @@
+{
+  "username": "曾凯",
+  "created_at": "2026-03-11T11:39:20.542053",
+  "interests": {
+    "keywords": [
+      "游戏",
+      "nba",
+      "体育",
+      "ai"
+    ],
+    "domain_ids": [],
+    "recent_topics": []
+  },
+  "preferences": {
+    "freshness_weight": 0.3,
+    "popularity_weight": 0.4,
+    "personalization_weight": 0.3
+  },
+  "interaction_history": [],
+  "recommendation_history": [],
+  "updated_at": "2026-03-11T11:52:36.577883"
+}
